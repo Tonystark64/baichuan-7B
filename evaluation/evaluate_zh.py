@@ -13,16 +13,19 @@ import argparse
 def get_time():
     return time.strftime("%Y%m%d %H:%M:%S", time.localtime()) 
 
-
-OPENMODEL_PATH = 'your/model/path'
+# 待评估模型的文件夹路径
+base_model = "/home/calvinzhang/huggingface_models/bloom-1b1"
+OPENMODEL_PATH = '/home/ryanzhang/nlp/models/math15k_ft1b1'
 if OPENMODEL_PATH == 'your/model/path':
     raise('Model path is not valid')
-CEVAL_DATA_PATH = 'your/ceval/data/path'
+# CEVAL数据集路径
+CEVAL_DATA_PATH = r"ceval/ceval-exam"
 results_filename = 'results.txt'
 
 
 def load_model(model_id):
     print('Loading', model_id)
+    # 模型名称，用于transformer不同library的调取
     model_id = os.path.join(OPENMODEL_PATH, model_id)
     if 'gpt2' in model_id:
         from transformers import GPT2LMHeadModel, GPT2TokenizerFast
@@ -79,14 +82,18 @@ def load_model(model_id):
                                              trust_remote_code=True,
                                              device_map='auto',
                                              torch_dtype=torch.bfloat16)
+    # bloom-1b1预训练的math15k FT模型
     else:
-        from transformers import AutoTokenizer, AutoModelForCausalLM
-        tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=False, trust_remote_code=True)
-        model = AutoModelForCausalLM.from_pretrained(model_id,
+        from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
+        tokenizer = AutoTokenizer.from_pretrained(base_model, use_fast=False, trust_remote_code=True)
+        model_config = AutoConfig.from_pretrained(base_model)
+        model = AutoModelForCausalLM.from_pretrained(OPENMODEL_PATH,
                                              trust_remote_code=True,
+                                             config = model_config,
                                              device_map='auto',
                                              torch_dtype=torch.bfloat16)
     candidates = ['A', 'B', 'C', 'D']
+    # A,B,C,D的token index 
     for can in candidates:
         can_idx = tokenizer.encode(can)
         print(can, can_idx)
@@ -97,7 +104,7 @@ class BaseEval:
     def __init__(self, model_id, data_path, show_detail=False):
         self.data_path = data_path
         self.model_id = model_id
-        self.task_names = self.get_task_names()
+        self.task_names = self.get_task_names() # English subject names 
         self.show_detail = show_detail
         self.max_new_tokens = 3  # 最多生成的token数
 
@@ -206,7 +213,7 @@ class BaseEval:
                 f.write('\n')
     
     def generate_sample(self, task_name='law', split='validatoin', shot=0):
-        dataset = datasets.load_dataset(self.data_path, task_name)
+        dataset = datasets.load_dataset(self.data_path, task_name) # task_name as subject subset
         data = dataset[split][0]
         print('Data' + 100*'-')
         print(data)
@@ -272,6 +279,7 @@ class CEval(BaseEval):
 
     def get_task_names(self):
         task_names = list(sorted(self.task2desc.keys()))
+        # task_names = ["ideological_and_moral_cultivation","law","legal_professional"]
         return task_names
     
     def build_an_example_prompt(self, data, with_answer=True):
@@ -295,11 +303,11 @@ class CEval(BaseEval):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpu_idx', type=str, required=True)
-    parser.add_argument('--model_id', type=str, default=None)
-    parser.add_argument('--task', type=str, required=True)
-    parser.add_argument('--shot', type=int, default=5)
-    parser.add_argument('--split', type=str, default='test')
+    parser.add_argument('--gpu_idx', type=str, required=True) # indicate which GPU to use
+    parser.add_argument('--model_id', type=str, default=None) # folder name
+    parser.add_argument('--task', type=str, required=True) # only option is ceval
+    parser.add_argument('--shot', type=int, default=5) # few-shot inference
+    parser.add_argument('--split', type=str, default='test') # which dataset to choose
     parser.add_argument('--show_detail', action='store_true')
     args = parser.parse_args()
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_idx
@@ -319,8 +327,7 @@ if __name__ == '__main__':
             raise('CEval data path is not valid')
         ceval = CEval(model_id, data_path, show_detail=show_detail)
         ceval.set_model_and_tokenizer(model, tokenizer)
-        ceval.generate_sample(task_name='law', split=split, shot=3)
+        ceval.generate_sample(task_name='middle_school_mathematics', split=split, shot=3)
         ceval.run(task_names=ceval.task_names, shot=shot, split=split)
     else:
         raise(f'Task is not valid: {args.task}')
-
